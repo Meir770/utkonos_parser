@@ -33,15 +33,17 @@ class connection_database_fecthall(connection_database_fecthone):
 
     def table(self, table, param):
         cur = self.conn.cursor()
-        if param['country']:
+        if param['country'] or param['power']:
             colums = {'model_list': 'model_list.ModelId, model_list.Maker, model_list.Model',
                       'car_names': 'car_names.MakeId, car_names.Model, car_names.MakeDescription',
                       'continents': 'continents.ContId, continents.Continent',
                       'countries': 'countries.CountryId, countries.CountryName, countries.Continent',
-                      'car_makers': 'car_makers.Id, car_makers.maker, car_makers.FullName, car_makers.Country'
+                      'car_makers': 'car_makers.Id, car_makers.maker, car_makers.FullName, car_makers.Country',
+                      'car_data': 'car_data.Id, car_data.MPG, car_data.Cylinders, car_data.Edispl, car_data.Horsepower, car_data.Weight, car_data.Accelerate, car_data.Year'
+
                       }
-            big_table = 'car_names JOIN model_list  ON model_list.model = car_names.model JOIN car_makers ON car_makers.id = model_list.maker JOIN countries  ON countries.countryid = car_makers.country'
-            querry = 'SELECT {} FROM {} {} {} {} '.format(colums[table], big_table, param['country'], param['sort'], param['pages'])
+            big_table = 'car_names JOIN model_list  ON model_list.model = car_names.model JOIN car_makers ON car_makers.id = model_list.maker JOIN countries  ON countries.countryid = car_makers.country JOIN car_data ON car_names.MakeId = car_data.Id'
+            querry = 'SELECT {} FROM {} {} {} {} {} {}'.format(colums[table], big_table, param['country'], param['model'], param['sort'], param['power'], param['pages'])
         else:
             querry = 'SELECT * FROM {} {} {} {} '.format(table,  param['model'], param['sort'], param['pages'])
         print(querry)
@@ -61,25 +63,40 @@ MY_DB_fecthall = connection_database_fecthall('cars_sql.db')
 
 # Класс с параметрами
 class Parameters(tornado.web.RequestHandler):
+
+
     def get_param(self, table):
         param = self.get_argument('sort', None, True)
         page = self.get_argument('page', 1, True)
         per_page = self.get_argument('per_page', 5, True)
         model_in = self.get_argument('model', '', True)
         country = self.get_argument('country', '', True)
+        horsepower = self.get_argument('horsepower', '', True)
 
         tables = {'model_list': ['Model', 'ModelId'],
-                  'car_names' : ['Model', 'MakeId'],
-                  'continents' : ['Continent', 'ContId'],
-                  'countries' : ['CountryName', 'CountryId'],
-                  'car_makers' : ['Maker', 'Id']
+                  'car_names': ['Model', 'MakeId'],
+                  'continents': ['Continent', 'ContId'],
+                  'countries': ['CountryName', 'CountryId'],
+                  'car_makers': ['Maker', 'Id'],
+                  'car_data': ['Year', 'Id']
                   }
+
+        if horsepower:
+            a = str(horsepower)
+            b = a.split('-')
+        #сделать проверку на ввод символа
+            power = 'AND car_data.Horsepower BETWEEN {} AND {}'.format(b[0], b[1])
+        else:
+            power = ''
+
+
         # sort
         sort = {}
         sort['name'] = 'ORDER BY {} ASC'.format(tables[table][0])
         sort['-name'] = 'ORDER BY {} DESC'.format(tables[table][0])
         sort['id'] = 'ORDER BY {} ASC'.format(tables[table][1])
         sort['-id'] = 'ORDER BY {} DESC'.format(tables[table][1])
+        sort['-country'] = 'ORDER BY countries.countryname DESC'
         sort[None] = ''
 
         # page
@@ -99,26 +116,30 @@ class Parameters(tornado.web.RequestHandler):
 
         pages = 'LIMIT {} OFFSET {}'.format(per_page, (page - 1) * per_page)
 
-
         if model_in:
-            model = 'WHERE model = \'\'\'{}\'\'\''.format(model_in)
+            model = 'WHERE {}.{} = \'\'\'{}\'\'\''.format(table, tables[table][0], model_in)
         else:
             model = ''
+        # не для join таблицы
+        # if model_in:
+        #     model = 'WHERE {}.model = \'\'\'{}\'\'\''.format(table, model_in)
+        # else:
+        #     model = ''
 
         if country:
             country = 'WHERE countries.CountryName = \'\'\'{}\'\'\''.format(country)
         else:
             country = ''
 
-
         ret = {
             'sort': sort[param],
             'pages': pages,
             'model': model,
-            'country': country
-               }
-        return ret
+            'country': country,
+            'power': power
+            }
 
+        return ret
 
 
 # Хендлер для вывода всей таблицы
@@ -207,6 +228,26 @@ class CarMakersHandler(Parameters):
         self.write(response)
 
 
+class CarsDataHandler(Parameters):
+    def get(self):
+        paramet = self.get_param('car_data')
+        data = MY_DB_fecthall.table('car_data', paramet)
+        if not data:
+            raise tornado.web.HTTPError(404)
+        data_list = []
+        for i in data:
+            data_list.append({
+                'Id': i[0],
+                'MPG': i[1],
+                'Cylinders': i[2],
+                'Edispl': i[3],
+                'Horsepower': i[4],
+                'Weight': i[5],
+                'Accelerate': i[6],
+                'Year': i[7]
+            })
+        response = {'data': data_list}
+        self.write(response)
 
 # Хендлер для вывода по id
 class CarMakerHandler(tornado.web.RequestHandler):
@@ -274,6 +315,22 @@ class ModelHandler(tornado.web.RequestHandler):
         self.write(response)
 
 
+class CarDataHandler(tornado.web.RequestHandler):
+    def get(self, id):
+        data_id = MY_DB_fecthone.table('car_data', 'Id', id)
+        if not data_id:
+            raise tornado.web.HTTPError(404)
+        response = {
+               'Id': data_id[0],
+                'MPG': data_id[1],
+                'Cylinders': data_id[2],
+                'Edispl': data_id[3],
+                'Horsepower': data_id[4],
+                'Weight': data_id[5],
+                'Accelerate': data_id[6],
+                'Year': data_id[7]
+            }
+        self.write(response)
 
 
 application = tornado.web.Application([
@@ -284,13 +341,16 @@ application = tornado.web.Application([
     (r"/continent", ContinentsHandler),
     (r"/countries", CountriesHandler),
     (r"/car-makers", CarMakersHandler),
+    (r"/car-data", CarsDataHandler),
 
     #Адрес для id
     (r"/models/([0-9]+)", ModelHandler),
     (r"/car-names/([0-9]+)", CarNameHandler),
     (r"/continent/([0-9]+)", ContinentHandler),
     (r"/countries/([0-9]+)", CountryHandler),
-    (r"/car-makers/([0-9]+)", CarMakerHandler)
+    (r"/car-makers/([0-9]+)", CarMakerHandler),
+    (r"/car-data/([0-9]+)", CarDataHandler)
+
 
 ])
 
