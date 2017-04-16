@@ -2,6 +2,7 @@ import tornado.escape
 import tornado.ioloop
 import tornado.web
 import sqlite3
+import re
 
 
 class connection_database_fecthone(object):
@@ -33,19 +34,47 @@ class connection_database_fecthall(connection_database_fecthone):
 
     def table(self, table, param):
         cur = self.conn.cursor()
-        if param['country'] or param['power']:
-            colums = {'model_list': 'model_list.ModelId, model_list.Maker, model_list.Model',
-                      'car_names': 'car_names.MakeId, car_names.Model, car_names.MakeDescription',
-                      'continents': 'continents.ContId, continents.Continent',
-                      'countries': 'countries.CountryId, countries.CountryName, countries.Continent',
-                      'car_makers': 'car_makers.Id, car_makers.maker, car_makers.FullName, car_makers.Country',
-                      'car_data': 'car_data.Id, car_data.MPG, car_data.Cylinders, car_data.Edispl, car_data.Horsepower, car_data.Weight, car_data.Accelerate, car_data.Year'
+        if param['where_all'] or param['horsepower']:
+
+            colums = {'model_list': 'model_list.ModelId, '
+                                    'model_list.Maker, '
+                                    'model_list.Model',
+                      'car_names': 'car_names.MakeId, '
+                                   'car_names.Model, '
+                                   'car_names.MakeDescription',
+                      'continents': 'continents.ContId, '
+                                    'continents.Continent',
+                      'countries': 'countries.CountryId, '
+                                   'countries.CountryName, '
+                                   'countries.Continent',
+                      'car_makers': 'car_makers.Id, '
+                                    'car_makers.maker, '
+                                    'car_makers.FullName, '
+                                    'car_makers.Country',
+                      'car_data': 'car_data.Id, '
+                                  'car_data.MPG, '
+                                  'car_data.Cylinders, '
+                                  'car_data.Edispl, '
+                                  'car_data.Horsepower, '
+                                  'car_data.Weight, '
+                                  'car_data.Accelerate, '
+                                  'car_data.Year'
 
                       }
-            big_table = 'car_names JOIN model_list  ON model_list.model = car_names.model JOIN car_makers ON car_makers.id = model_list.maker JOIN countries  ON countries.countryid = car_makers.country JOIN car_data ON car_names.MakeId = car_data.Id'
-            querry = 'SELECT {} FROM {} {} {} {} {} {}'.format(colums[table], big_table, param['country'], param['model'], param['sort'], param['power'], param['pages'])
+
+            big_table = 'car_names JOIN model_list  ON model_list.model = car_names.model ' \
+                        'JOIN car_makers ON car_makers.id = model_list.maker ' \
+                        'JOIN countries  ON countries.countryid = car_makers.country ' \
+                        'JOIN car_data ON car_names.MakeId = car_data.Id'
+
+            querry = 'SELECT {} FROM {} {} {} {} {} '.format(colums[table],
+                                                             big_table,
+                                                             param['where_all'],
+                                                             param['sort'],
+                                                             param['horsepower'],
+                                                             param['pages'])
         else:
-            querry = 'SELECT * FROM {} {} {} {} '.format(table,  param['model'], param['sort'], param['pages'])
+            querry = 'SELECT * FROM {} {} {} {} '.format(table, param['where_one'], param['sort'], param['pages'])
         print(querry)
         cur.execute(querry)
         data_model = cur.fetchall()
@@ -63,81 +92,85 @@ MY_DB_fecthall = connection_database_fecthall('cars_sql.db')
 
 # Класс с параметрами
 class Parameters(tornado.web.RequestHandler):
+    tables = {'model_list': ['Model', 'ModelId'],
+              'car_names': ['Model', 'MakeId'],
+              'continents': ['Continent', 'ContId'],
+              'countries': ['CountryName', 'CountryId'],
+              'car_makers': ['Maker', 'Id'],
+              'car_data': ['Year', 'Id']
+              }
 
+    def sort(self, table):
+        sort = self.get_argument('sort', None, True)
 
-    def get_param(self, table):
-        param = self.get_argument('sort', None, True)
+        sort_list = {'name': 'ORDER BY {}.{} ASC'.format(table, Parameters.tables[table][0]),
+                     '-name': 'ORDER BY {}.{} DESC'.format(table, Parameters.tables[table][0]),
+                     'id': 'ORDER BY {}.{} ASC'.format(table, Parameters.tables[table][1]),
+                     '-id': 'ORDER BY {}.{} DESC'.format(table, Parameters.tables[table][1])}
+        return sort_list.get(sort, '')
+
+    def page(self):
         page = self.get_argument('page', 1, True)
         per_page = self.get_argument('per_page', 5, True)
-        model_in = self.get_argument('model', '', True)
-        country = self.get_argument('country', '', True)
-        horsepower = self.get_argument('horsepower', '', True)
 
-        tables = {'model_list': ['Model', 'ModelId'],
-                  'car_names': ['Model', 'MakeId'],
-                  'continents': ['Continent', 'ContId'],
-                  'countries': ['CountryName', 'CountryId'],
-                  'car_makers': ['Maker', 'Id'],
-                  'car_data': ['Year', 'Id']
-                  }
-
-        if horsepower:
-            a = str(horsepower)
-            b = a.split('-')
-        #сделать проверку на ввод символа
-            power = 'AND car_data.Horsepower BETWEEN {} AND {}'.format(b[0], b[1])
-        else:
-            power = ''
-
-
-        # sort
-        sort = {}
-        sort['name'] = 'ORDER BY {} ASC'.format(tables[table][0])
-        sort['-name'] = 'ORDER BY {} DESC'.format(tables[table][0])
-        sort['id'] = 'ORDER BY {} ASC'.format(tables[table][1])
-        sort['-id'] = 'ORDER BY {} DESC'.format(tables[table][1])
-        sort['-country'] = 'ORDER BY countries.countryname DESC'
-        sort[None] = ''
-
-        # page
         try:
             page = int(page)
             if page < 1:
                 page = 1
-        except TypeError:
+        except ValueError:
             page = 1
 
         try:
             per_page = int(per_page)
             if per_page < 1:
                 per_page = 5
-        except TypeError:
+        except ValueError:
             per_page = 5
 
         pages = 'LIMIT {} OFFSET {}'.format(per_page, (page - 1) * per_page)
 
-        if model_in:
-            model = 'WHERE {}.{} = \'\'\'{}\'\'\''.format(table, tables[table][0], model_in)
-        else:
-            model = ''
-        # не для join таблицы
-        # if model_in:
-        #     model = 'WHERE {}.model = \'\'\'{}\'\'\''.format(table, model_in)
-        # else:
-        #     model = ''
+        return pages
 
-        if country:
-            country = 'WHERE countries.CountryName = \'\'\'{}\'\'\''.format(country)
+    def where_all(self, table):
+        where_all = self.get_argument('where_all', '', True)
+        if where_all:
+            all = 'WHERE {}.{} = \'\'\'{}\'\'\''.format(table, Parameters.tables[table][0], where_all)
         else:
-            country = ''
+            all = ''
 
-        ret = {
-            'sort': sort[param],
-            'pages': pages,
-            'model': model,
-            'country': country,
-            'power': power
-            }
+        return all
+
+    def where_one(self, table):
+        where_one = self.get_argument('where_one', '', True)
+        if where_one:
+            one = 'WHERE {}.{} = \'\'\'{}\'\'\''.format(table, Parameters.tables[table][0], where_one)
+        else:
+            one = ''
+
+        return one
+
+    def get_param(self, table):
+        sort = Parameters.sort(self, table)
+        pages = Parameters.page(self)
+        where_all = Parameters.where_all(self, table)
+        where_one = Parameters.where_one(self, table)
+        horsepower = self.get_argument('horsepower', '', True)
+
+        if horsepower:
+            a = str(horsepower)
+            b = re.findall(r'\d+', a)
+            if len(b) == 3 and b[0] < b[2] < b[1]:
+                power = 'AND car_data.Horsepower BETWEEN {} AND {} AND NOT car_data.Horsepower = {}'.format(b[0], b[1], b[2])
+            elif len(b) == 2 and b[0] < b[1]:
+                power = 'AND car_data.Horsepower BETWEEN {} AND {}'.format(b[0], b[1])
+            else:
+                power = ''
+
+        ret = {'sort': sort,
+               'pages': pages,
+               'where_all': where_all,
+               'where_one': where_one,
+               'horsepower': power}
 
         return ret
 
